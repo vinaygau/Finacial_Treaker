@@ -1,0 +1,19 @@
+
+plotly>=5.0.0
+streamlit>=1.0.0
+pandas>=1.0.0
+
+streamlit==1.32.0
+pandas==2.1.4
+plotly-express==0.4.1
+sqlite3==3.42.0  # Usually comes with Python
+
+
+reportlab==4.0.4
+
+
+python-dateutil==2.8.2  # For date handling
+numpy==1.26.0  # Required by pandas
+
+black==23.11.0  # Code formatting
+pylint==3.0.3  # Code linting
