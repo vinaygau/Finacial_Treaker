@@ -10,6 +10,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
 import time
 import requests
+from reportlab.lib import colors
 
 # Initialize database
 def init_db():
