@@ -1,16 +1,17 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go  # Optional, if you need extra features
+import plotly.graph_objects as go  # Optional, for extra Plotly features
 from datetime import datetime, timedelta
 import sqlite3
 import io
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors  # Added as requested
 import time
 import requests
-from reportlab.lib import colors
+
 
 # Initialize database
 def init_db():
