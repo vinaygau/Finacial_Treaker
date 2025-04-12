@@ -3,7 +3,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import io
 import time
-from supabase import create_client, Client
 import google.generativeai as genai
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image
