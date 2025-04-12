@@ -7,20 +7,36 @@ import calendar
 from dateutil.relativedelta import relativedelta
 import numpy as np
 import os
+from supabase import create_client
+import google.generativeai as genai
+
 
 # --------------------------
 # CONFIGURATION (using environment variables)
 # --------------------------
 
 # Initialize configuration from environment variables or Streamlit secrets
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("https://hugjvlpvxqvnkuzfyacw.supabase.co"))
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Z2p2bHB2eHF2bmt1emZ5YWN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ0Nzg4NDIsImV4cCI6MjA2MDA1NDg0Mn0.BDe2Wrr74P-pkR0XF6Sfgheq6k4Z0LvidHV-7JiDC30"))
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.getenv("AIzaSyAtGPjtvE-kiDDNjrK75y5uKUz8SfEmQc"))
+def get_config():
+    """Get configuration from secrets or environment variables"""
+    return {
+        "SUPABASE_URL": st.secrets.get("SUPABASE_URL", os.getenv("https://hugjvlpvxqvnkuzfyacw.supabase.co")),
+        "SUPABASE_KEY": st.secrets.get("SUPABASE_KEY", os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Z2p2bHB2eHF2bmt1emZ5YWN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ0Nzg4NDIsImV4cCI6MjA2MDA1NDg0Mn0.BDe2Wrr74P-pkR0XF6Sfgheq6k4Z0LvidHV-7JiDC30")),
+        "GEMINI_API_KEY": st.secrets.get("GEMINI_API_KEY", os.getenv("AIzaSyAtGPjtvE-kiDDNjrK75y5uKUz8SfEmQcI"))
+    }
+
+config = get_config()
 
 # Validate configuration
-if not all([SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY]):
-    st.error("Missing required configuration. Please check your environment variables or Streamlit secrets.")
+if not all(config.values()):
+    st.error("""Missing required configuration. Please check:
+            1. For local development: Create a .env file with SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY
+            2. For Streamlit Cloud: Add these as secrets in secrets.toml""")
     st.stop()
+
+# Assign to variables
+SUPABASE_URL = config["SUPABASE_URL"]
+SUPABASE_KEY = config["SUPABASE_KEY"]
+GEMINI_API_KEY = config["GEMINI_API_KEY"]
 
 # --------------------------
 # INITIALIZATION
@@ -28,21 +44,19 @@ if not all([SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY]):
 
 @st.cache_resource
 def init_supabase():
-    """Initialize and cache Supabase client"""
     try:
         return create_client(SUPABASE_URL, SUPABASE_KEY)
     except Exception as e:
-        st.error(f"Failed to initialize Supabase client: {e}")
+        st.error(f"Supabase connection failed: {e}")
         st.stop()
 
 @st.cache_resource
 def init_gemini():
-    """Initialize and cache Gemini client"""
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         return genai.GenerativeModel('gemini-pro')
     except Exception as e:
-        st.error(f"Failed to initialize Gemini client: {e}")
+        st.error(f"Gemini AI setup failed: {e}")
         st.stop()
 
 # Initialize clients
