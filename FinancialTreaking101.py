@@ -18,8 +18,6 @@ def init_supabase():
     SUPABASE_KEY = st.secrets["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Z2p2bHB2eHF2bmt1emZ5YWN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ0Nzg4NDIsImV4cCI6MjA2MDA1NDg0Mn0.BDe2Wrr74P-pkR0XF6Sfgheq6k4Z0LvidHV-7JiDC30"]
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Initialize Gemini AI
-genai.configure(api_key=st.secrets["AIzaSyAtGPjtvE-kiDDNjrK75y5uKUz8SfEmQc"])
 
 # Initialize clients
 sb = init_supabase()
