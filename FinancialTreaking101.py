@@ -7,7 +7,6 @@ import calendar
 from dateutil.relativedelta import relativedelta
 import numpy as np
 import os
-import google.generativeai as genai
 
 
 # --------------------------
