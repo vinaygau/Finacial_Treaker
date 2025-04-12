@@ -1,496 +1,653 @@
 import streamlit as st
-import pandas as pd# Optional, if you need extra features
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import sqlite3
 import io
 import time
-import requests
+from supabase import create_client, Client
+import google.generativeai as genai
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from reportlab.platypus.flowables import Spacer
+import calendar
+from dateutil.relativedelta import relativedelta
+import numpy as np
 
-# Initialize database
+# --------------------------
+# INITIALIZATION
+# --------------------------
+
+# Initialize Supabase client
+@st.cache_resource
+def init_supabase():
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Initialize Gemini AI
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+
+# Initialize clients
+sb = init_supabase()
+financial_model = genai.GenerativeModel('gemini-pro')
+
+# --------------------------
+# DATABASE FUNCTIONS
+# --------------------------
+
 def init_db():
-    retries = 5
-    for attempt in range(retries):
-        try:
-            conn = sqlite3.connect('finance.db', check_same_thread=False, timeout=10)
-            c = conn.cursor()
-            c.execute('''DROP TABLE IF EXISTS expenses''')
-            c.execute('''DROP TABLE IF EXISTS budgets''')
-            c.execute('''DROP TABLE IF EXISTS savings_goals''')
-            c.execute('''DROP TABLE IF EXISTS income''')
-            c.execute('''DROP TABLE IF EXISTS users''')
-            c.execute('''DROP TABLE IF EXISTS investments''')
-            c.execute('''DROP TABLE IF EXISTS recurring''')
+    """Initialize database tables if they don't exist"""
+    try:
+        # Check if user exists
+        user = sb.table("users").select("*").eq("user_id", 1).execute()
+        if not user.data:
+            sb.table("users").insert({
+                "user_id": 1,
+                "username": "user1",
+                "password": "pass1",
+                "currency": "USD",
+                "financial_goals": []
+            }).execute()
+        return True
+    except Exception as e:
+        st.error(f"Database init error: {e}")
+        return False
+
+def get_user_settings(user_id):
+    """Get user preferences and settings"""
+    try:
+        settings = sb.table("users").select("*").eq("user_id", user_id).execute()
+        return settings.data[0] if settings.data else None
+    except Exception as e:
+        st.error(f"Error getting user settings: {e}")
+        return None
+
+def update_user_settings(user_id, updates):
+    """Update user settings"""
+    try:
+        sb.table("users").update(updates).eq("user_id", user_id).execute()
+        return True
+    except Exception as e:
+        st.error(f"Error updating settings: {e}")
+        return False
+
+# --------------------------
+# AI PROCESSING FUNCTIONS
+# --------------------------
+
+def analyze_spending_patterns(user_id):
+    """Use AI to analyze spending patterns and provide insights"""
+    try:
+        expenses = sb.table("expenses").select("*").eq("user_id", user_id).execute()
+        expenses_df = pd.DataFrame(expenses.data)
+        
+        if len(expenses_df) < 10:
+            return "Not enough data for meaningful analysis"
+        
+        prompt = f"""
+        Analyze these financial transactions and provide insights:
+        {expenses_df.to_string()}
+        
+        Provide:
+        1. Top spending categories
+        2. Unusual spending patterns
+        3. Potential savings opportunities
+        4. Weekly/Monthly trends
+        5. Personalized recommendations
+        
+        Format as markdown with bullet points.
+        """
+        
+        response = financial_model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        st.error(f"AI analysis error: {e}")
+        return "Analysis failed"
+
+def process_financial_document(file_content, file_type):
+    """Process uploaded financial documents with AI"""
+    try:
+        prompt = f"""
+        Extract financial transactions from this {file_type} document.
+        Return a JSON array with fields: date, description, amount, category.
+        
+        Document content:
+        {str(file_content)[:10000]}... [truncated]
+        """
+        
+        response = financial_model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        st.error(f"Document processing error: {e}")
+        return None
+
+# --------------------------
+# FINANCIAL OPERATIONS
+# --------------------------
+
+def add_transaction(user_id, trans_type, data):
+    """Add a financial transaction (expense/income)"""
+    try:
+        data["user_id"] = user_id
+        data["created_at"] = datetime.now().isoformat()
+        
+        if trans_type == "expense":
+            sb.table("expenses").insert(data).execute()
+        else:
+            sb.table("income").insert(data).execute()
+        
+        # Update budget tracking
+        if trans_type == "expense" and "category" in data:
+            update_budget_usage(user_id, data["category"], data["amount"])
+        
+        return True
+    except Exception as e:
+        st.error(f"Error adding transaction: {e}")
+        return False
+
+def get_financial_summary(user_id, period="month"):
+    """Get comprehensive financial summary"""
+    try:
+        end_date = datetime.now()
+        
+        if period == "week":
+            start_date = end_date - timedelta(days=7)
+        elif period == "month":
+            start_date = end_date - timedelta(days=30)
+        elif period == "year":
+            start_date = end_date - timedelta(days=365)
+        else:
+            start_date = end_date - timedelta(days=30)
+        
+        # Get expenses
+        expenses = sb.table("expenses")\
+                   .select("*")\
+                   .eq("user_id", user_id)\
+                   .gte("date", start_date.isoformat())\
+                   .lte("date", end_date.isoformat())\
+                   .execute()
+        
+        # Get income
+        income = sb.table("income")\
+                 .select("*")\
+                 .eq("user_id", user_id)\
+                 .gte("date", start_date.isoformat())\
+                 .lte("date", end_date.isoformat())\
+                 .execute()
+        
+        # Get budgets
+        budgets = sb.table("budgets")\
+                   .select("*")\
+                   .eq("user_id", user_id)\
+                   .execute()
+        
+        # Convert to DataFrames
+        expenses_df = pd.DataFrame(expenses.data)
+        income_df = pd.DataFrame(income.data)
+        budgets_df = pd.DataFrame(budgets.data)
+        
+        # Calculate totals
+        total_expenses = expenses_df['amount'].sum() if not expenses_df.empty else 0
+        total_income = income_df['amount'].sum() if not income_df.empty else 0
+        net_balance = total_income - total_expenses
+        
+        # Calculate budget usage
+        budget_usage = {}
+        if not budgets_df.empty and not expenses_df.empty:
+            for _, budget in budgets_df.iterrows():
+                category_expenses = expenses_df[expenses_df['category'] == budget['category']]['amount'].sum()
+                budget_usage[budget['category']] = {
+                    'limit': budget['limit_amount'],
+                    'spent': category_expenses,
+                    'remaining': budget['limit_amount'] - category_expenses,
+                    'percentage': (category_expenses / budget['limit_amount']) * 100 if budget['limit_amount'] > 0 else 0
+                }
+        
+        return {
+            'total_income': total_income,
+            'total_expenses': total_expenses,
+            'net_balance': net_balance,
+            'budget_usage': budget_usage,
+            'expenses_by_category': expenses_df.groupby('category')['amount'].sum().to_dict(),
+            'income_by_source': income_df.groupby('source')['amount'].sum().to_dict(),
+            'start_date': start_date,
+            'end_date': end_date
+        }
+    except Exception as e:
+        st.error(f"Error getting financial summary: {e}")
+        return None
+
+# --------------------------
+# REPORT GENERATION
+# --------------------------
+
+def generate_comprehensive_report(user_id):
+    """Generate a detailed PDF financial report"""
+    try:
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Title
+        elements.append(Paragraph("Comprehensive Financial Report", styles['Title']))
+        elements.append(Spacer(1, 12))
+        
+        # Date
+        elements.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d')}", styles['Normal']))
+        elements.append(Spacer(1, 24))
+        
+        # 1. Financial Summary
+        summary = get_financial_summary(user_id, "month")
+        elements.append(Paragraph("1. Financial Summary", styles['Heading2']))
+        
+        summary_data = [
+            ["Metric", "Amount"],
+            ["Total Income", f"${summary['total_income']:,.2f}"],
+            ["Total Expenses", f"${summary['total_expenses']:,.2f}"],
+            ["Net Balance", f"${summary['net_balance']:,.2f}"]
+        ]
+        
+        summary_table = Table(summary_data)
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#2E86AB")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F5F5F5")),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        elements.append(summary_table)
+        elements.append(Spacer(1, 24))
+        
+        # 2. Budget Analysis
+        elements.append(Paragraph("2. Budget Analysis", styles['Heading2']))
+        
+        if summary['budget_usage']:
+            budget_data = [["Category", "Budget", "Spent", "Remaining", "Usage %"]]
+            for category, data in summary['budget_usage'].items():
+                budget_data.append([
+                    category,
+                    f"${data['limit']:,.2f}",
+                    f"${data['spent']:,.2f}",
+                    f"${data['remaining']:,.2f}",
+                    f"{data['percentage']:.1f}%"
+                ])
             
-            c.execute('''CREATE TABLE IF NOT EXISTS users
-                        (user_id INTEGER PRIMARY KEY, username TEXT, password TEXT)''')
-            c.execute('''CREATE TABLE IF NOT EXISTS expenses
-                        (expense_id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL, 
-                        category TEXT, subcategory TEXT, date DATE, description TEXT, 
-                        payment_method TEXT, FOREIGN KEY(user_id) REFERENCES users(user_id))''')
-            c.execute('''CREATE TABLE IF NOT EXISTS budgets
-                        (budget_id INTEGER PRIMARY KEY, user_id INTEGER, category TEXT, 
-                        subcategory TEXT, limit_amount REAL, period TEXT,
-                        FOREIGN KEY(user_id) REFERENCES users(user_id))''')
-            c.execute('''CREATE TABLE IF NOT EXISTS savings_goals
-                        (goal_id INTEGER PRIMARY KEY, user_id INTEGER, goal_name TEXT, 
-                        target_amount REAL, current_amount REAL, target_date DATE, 
-                        priority INTEGER, description TEXT,
-                        FOREIGN KEY(user_id) REFERENCES users(user_id))''')
-            c.execute('''CREATE TABLE IF NOT EXISTS income
-                        (income_id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL, 
-                        source TEXT, date DATE, description TEXT,
-                        FOREIGN KEY(user_id) REFERENCES users(user_id))''')
-            c.execute('''CREATE TABLE IF NOT EXISTS investments
-                        (inv_id INTEGER PRIMARY KEY, user_id INTEGER, asset_name TEXT, 
-                        amount_invested REAL, current_value REAL, purchase_date DATE,
-                        FOREIGN KEY(user_id) REFERENCES users(user_id))''')
-            c.execute('''CREATE TABLE IF NOT EXISTS recurring
-                        (rec_id INTEGER PRIMARY KEY, user_id INTEGER, type TEXT, 
-                        amount REAL, category TEXT, frequency TEXT, next_date DATE,
-                        FOREIGN KEY(user_id) REFERENCES users(user_id))''')
+            budget_table = Table(budget_data)
+            budget_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#2E86AB")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F5F5F5")),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('TEXTCOLOR', (-1, 1), (-1, -1), 
+                 colors.red if data['percentage'] > 90 else 
+                 (colors.orange if data['percentage'] > 75 else colors.green))
+            ]))
+            elements.append(budget_table)
+        else:
+            elements.append(Paragraph("No budget data available", styles['Normal']))
+        
+        elements.append(Spacer(1, 24))
+        
+        # 3. AI-Powered Insights
+        elements.append(Paragraph("3. AI-Powered Financial Insights", styles['Heading2']))
+        insights = analyze_spending_patterns(user_id)
+        elements.append(Paragraph(insights, styles['Normal']))
+        
+        # Build the PDF
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer
+    except Exception as e:
+        st.error(f"Error generating report: {e}")
+        return None
+
+# --------------------------
+# STREAMLIT UI
+# --------------------------
+
+def main():
+    # Initialize database
+    if not init_db():
+        st.error("Failed to initialize database")
+        st.stop()
+    
+    current_user_id = 1
+    user_settings = get_user_settings(current_user_id)
+    
+    # Page config
+    st.set_page_config(
+        page_title="ProFinance Manager", 
+        layout="wide", 
+        initial_sidebar_state="expanded",
+        menu_items={
+            'Get Help': 'https://github.com/your-repo',
+            'Report a bug': "https://github.com/your-repo/issues",
+            'About': "# Advanced Financial Tracker"
+        }
+    )
+    
+    # Custom CSS
+    st.markdown("""
+    <style>
+        .main {
+            padding: 2rem;
+        }
+        .sidebar .sidebar-content {
+            background-color: #f8f9fa;
+        }
+        .stButton>button {
+            background-color: #2E86AB;
+            color: white;
+            border-radius: 8px;
+            padding: 0.5rem 1rem;
+        }
+        .stTextInput>div>div>input, .stNumberInput>div>div>input, .stDateInput>div>div>input {
+            border-radius: 8px;
+        }
+        .metric-box {
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Sidebar
+    with st.sidebar:
+        st.markdown("<h1 style='text-align: center; color: #2E86AB;'>💼 ProFinance</h1>", unsafe_allow_html=True)
+        st.markdown("---")
+        
+        # Navigation
+        menu = st.expander("📋 Navigation", expanded=True)
+        with menu:
+            page = st.radio(
+                "Go to",
+                ["🏠 Dashboard", "💸 Expenses", "💵 Income", "📊 Budgets", 
+                 "🎯 Goals", "📈 Analytics", "📑 Reports", "⚙️ Settings"],
+                label_visibility="collapsed"
+            )
+        
+        st.markdown("---")
+        
+        # Quick Add
+        with st.expander("⚡ Quick Add", expanded=True):
+            with st.form("quick_add_form"):
+                trans_type = st.radio("Type", ["Expense", "Income"], horizontal=True)
+                amount = st.number_input("Amount", min_value=0.01, step=0.01)
+                category = st.text_input("Category" if trans_type == "Expense" else "Source")
+                submitted = st.form_submit_button("Add")
+                
+                if submitted:
+                    if add_transaction(current_user_id, trans_type.lower(), {
+                        "amount": amount,
+                        "category": category,
+                        "date": datetime.now().isoformat(),
+                        "description": "Quick add"
+                    }):
+                        st.success("Added successfully!")
+                    else:
+                        st.error("Failed to add transaction")
+        
+        st.markdown("---")
+        st.markdown("<p style='text-align: center; color: grey;'>v2.0 • Made with ❤️</p>", unsafe_allow_html=True)
+    
+    # Dashboard Page
+    if page == "🏠 Dashboard":
+        st.title("Financial Dashboard")
+        
+        # Financial Summary Cards
+        st.subheader("Overview")
+        summary = get_financial_summary(current_user_id, "month")
+        
+        if summary:
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown(f"""
+                <div class='metric-box'>
+                    <h3>Total Income</h3>
+                    <h2>${summary['total_income']:,.2f}</h2>
+                </div>
+                """, unsafe_allow_html=True)
             
-            c.execute("INSERT OR IGNORE INTO users (user_id, username, password) VALUES (?, ?, ?)", (1, 'user1', 'pass1'))
-            conn.commit()
-            return conn
-        except sqlite3.OperationalError as e:
-            if "database is locked" in str(e) and attempt < retries - 1:
-                time.sleep(1)
-                continue
+            with col2:
+                st.markdown(f"""
+                <div class='metric-box'>
+                    <h3>Total Expenses</h3>
+                    <h2>${summary['total_expenses']:,.2f}</h2>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                balance_color = "#4CAF50" if summary['net_balance'] >= 0 else "#F44336"
+                st.markdown(f"""
+                <div class='metric-box'>
+                    <h3>Net Balance</h3>
+                    <h2 style='color: {balance_color}'>${summary['net_balance']:,.2f}</h2>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                savings = sb.table("savings_goals").select("current_amount").eq("user_id", current_user_id).execute()
+                total_savings = sum([s['current_amount'] for s in savings.data]) if savings.data else 0
+                st.markdown(f"""
+                <div class='metric-box'>
+                    <h3>Total Savings</h3>
+                    <h2>${total_savings:,.2f}</h2>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # File Upload and AI Processing
+        st.subheader("Document Processing")
+        with st.expander("📤 Upload Financial Documents", expanded=True):
+            uploaded_file = st.file_uploader(
+                "Upload financial documents (CSV, PDF, receipts, statements)",
+                type=["csv", "pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=False,
+                key="doc_uploader"
+            )
+            
+            if uploaded_file:
+                with st.spinner("Processing your document with AI..."):
+                    file_content = uploaded_file.read()
+                    processed_data = process_financial_document(file_content, uploaded_file.type)
+                    
+                    if processed_data:
+                        st.success("Document processed successfully!")
+                        st.json(processed_data)
+                        
+                        if st.button("Save Extracted Data"):
+                            try:
+                                # Parse and save the processed data
+                                transactions = eval(processed_data)  # In production, use proper JSON parsing
+                                for t in transactions:
+                                    add_transaction(current_user_id, "expense", {
+                                        "amount": t['amount'],
+                                        "category": t['category'],
+                                        "date": t['date'],
+                                        "description": t['description'],
+                                        "payment_method": "Extracted"
+                                    })
+                                st.success(f"Saved {len(transactions)} transactions!")
+                            except Exception as e:
+                                st.error(f"Error saving data: {e}")
+        
+        # Recent Transactions
+        st.subheader("Recent Transactions")
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            transactions = sb.table("transactions")\
+                          .select("*")\
+                          .eq("user_id", current_user_id)\
+                          .order("date", desc=True)\
+                          .limit(10)\
+                          .execute()
+            
+            if transactions.data:
+                trans_df = pd.DataFrame(transactions.data)
+                st.dataframe(
+                    trans_df[['date', 'description', 'amount', 'category']]\
+                        .rename(columns={
+                            'date': 'Date',
+                            'description': 'Description',
+                            'amount': 'Amount',
+                            'category': 'Category'
+                        }),
+                    use_container_width=True
+                )
             else:
-                st.error(f"Database error: {e}")
-                raise
-    st.error("Failed to initialize database after multiple attempts.")
-    return None
-
-# Load CSV into database
-def load_csv_to_db(conn, uploaded_file, user_id):
-    c = conn.cursor()
-    uploaded_df = pd.read_csv(uploaded_file)
-    c.execute("DELETE FROM expenses WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM income WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM savings_goals WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM budgets WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM investments WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM recurring WHERE user_id = ?", (user_id,))
+                st.info("No recent transactions found")
+        
+        with col2:
+            st.markdown("### Quick Filters")
+            view = st.radio(
+                "View",
+                ["All", "Expenses", "Income"],
+                index=0
+            )
+            
+            time_frame = st.selectbox(
+                "Time Frame",
+                ["Last 7 days", "Last 30 days", "Last 90 days", "This year"],
+                index=1
+            )
+        
+        # Financial Charts
+        st.subheader("Financial Trends")
+        tab1, tab2, tab3 = st.tabs(["Spending", "Income", "Cash Flow"])
+        
+        with tab1:
+            # Spending trends chart
+            expenses = sb.table("expenses")\
+                      .select("date, amount, category")\
+                      .eq("user_id", current_user_id)\
+                      .order("date")\
+                      .execute()
+            
+            if expenses.data:
+                exp_df = pd.DataFrame(expenses.data)
+                exp_df['date'] = pd.to_datetime(exp_df['date'])
+                exp_df['month'] = exp_df['date'].dt.to_period('M')
+                
+                monthly_expenses = exp_df.groupby(['month', 'category'])['amount'].sum().unstack().fillna(0)
+                
+                fig = px.bar(
+                    monthly_expenses,
+                    title="Monthly Spending by Category",
+                    labels={'value': 'Amount', 'month': 'Month'},
+                    barmode='stack'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No expense data available")
+        
+        with tab2:
+            # Income trends chart
+            income = sb.table("income")\
+                    .select("date, amount, source")\
+                    .eq("user_id", current_user_id)\
+                    .order("date")\
+                    .execute()
+            
+            if income.data:
+                inc_df = pd.DataFrame(income.data)
+                inc_df['date'] = pd.to_datetime(inc_df['date'])
+                inc_df['month'] = inc_df['date'].dt.to_period('M')
+                
+                monthly_income = inc_df.groupby(['month', 'source'])['amount'].sum().unstack().fillna(0)
+                
+                fig = px.line(
+                    monthly_income,
+                    title="Monthly Income by Source",
+                    labels={'value': 'Amount', 'month': 'Month'}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No income data available")
+        
+        with tab3:
+            # Cash flow chart
+            if 'exp_df' in locals() and 'inc_df' in locals():
+                cash_flow = pd.concat([
+                    exp_df.assign(type='Expense', amount=-exp_df['amount']),
+                    inc_df.assign(type='Income')
+                ])
+                
+                cash_flow['cumulative'] = cash_flow.groupby('type')['amount'].cumsum()
+                
+                fig = px.line(
+                    cash_flow,
+                    x='date',
+                    y='cumulative',
+                    color='type',
+                    title="Cumulative Cash Flow",
+                    labels={'date': 'Date', 'cumulative': 'Amount'}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Not enough data for cash flow analysis")
     
-    for index, row in uploaded_df.iterrows():
-        data_type = row.get('type', '').lower()
-        try:
-            if data_type == 'expense':
-                c.execute("INSERT INTO expenses (user_id, amount, category, date, description, payment_method) VALUES (?, ?, ?, ?, ?, ?)",
-                          (user_id, row.get('amount', 0), row.get('category', 'Other'), row.get('date', datetime.now().strftime('%Y-%m-%d')),
-                           row.get('description', ''), row.get('payment_method', 'Unknown')))
-            elif data_type == 'income':
-                c.execute("INSERT INTO income (user_id, amount, source, date, description) VALUES (?, ?, ?, ?, ?)",
-                          (user_id, row.get('amount', 0), row.get('source', 'Other'), row.get('date', datetime.now().strftime('%Y-%m-%d')),
-                           row.get('description', '')))
-            elif data_type == 'savings':
-                c.execute("INSERT INTO savings_goals (user_id, goal_name, target_amount, current_amount, target_date, priority) VALUES (?, ?, ?, ?, ?, ?)",
-                          (user_id, row.get('goal_name', 'Unnamed Goal'), row.get('target_amount', 0), row.get('current_amount', 0),
-                           row.get('target_date', '2025-12-31'), row.get('priority', 1)))
-            elif data_type == 'budget':
-                c.execute("INSERT INTO budgets (user_id, category, limit_amount, period) VALUES (?, ?, ?, ?)",
-                          (user_id, row.get('category', 'Other'), row.get('limit_amount', 0), row.get('period', 'Monthly')))
-            elif data_type == 'investment':
-                c.execute("INSERT INTO investments (user_id, asset_name, amount_invested, current_value, purchase_date) VALUES (?, ?, ?, ?, ?)",
-                          (user_id, row.get('asset_name', 'Unknown'), row.get('amount_invested', 0), row.get('current_value', 0),
-                           row.get('purchase_date', datetime.now().strftime('%Y-%m-%d'))))
-            elif data_type == 'recurring':
-                c.execute("INSERT INTO recurring (user_id, type, amount, category, frequency, next_date) VALUES (?, ?, ?, ?, ?, ?)",
-                          (user_id, row.get('rec_type', 'expense'), row.get('amount', 0), row.get('category', 'Other'),
-                           row.get('frequency', 'Monthly'), row.get('next_date', datetime.now().strftime('%Y-%m-%d'))))
-        except KeyError as e:
-            st.warning(f"Skipping row {index}: Missing column {e}")
-    conn.commit()
-    return uploaded_df
-
-# Initialize database
-conn = init_db()
-if conn is None:
-    st.stop()
-
-# Page config
-st.set_page_config(page_title="ProFinance Manager", layout="wide", initial_sidebar_state="expanded")
-
-# Fancy Sidebar
-with st.sidebar:
-    st.markdown("<h1 style='text-align: center; color: #00CC96;'>💼 ProFinance</h1>", unsafe_allow_html=True)
-    st.markdown("---")
-    menu = st.expander("📋 Menu", expanded=True)
-    with menu:
-        page = st.radio("Navigation", ["🏠 Dashboard", "💸 Expenses", "💵 Income", "📊 Budgets", "🎯 Goals", 
-                                       "📈 Analytics", "📑 Reports", "💰 Investments", "🔄 Recurring"], 
-                       label_visibility="hidden")  # Hidden label for accessibility
-    st.markdown("---")
-    st.subheader("📤 Upload Data")
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"], help="Supported types: expense, income, savings, budget, investment, recurring")
-    if uploaded_file:
-        uploaded_df = load_csv_to_db(conn, uploaded_file, 1)
-        st.success("Data loaded successfully!")
-    st.markdown("---")
-    st.markdown("<p style='text-align: center; color: grey;'>Made with ❤️ by xAI</p>", unsafe_allow_html=True)
-
-current_user_id = 1
-page = page.split()[1]  # Extract page name from sidebar radio
-
-# Dynamic Categories
-DEFAULT_EXPENSE_CATEGORIES = ["Housing", "Food", "Transportation", "Utilities", "Healthcare", "Entertainment", "Education", "Personal", "Debt Payments", "Savings", "Investments", "Gifts", "Other"]
-DEFAULT_PAYMENT_METHODS = ["Cash", "Credit Card", "Debit Card", "Bank Transfer", "Digital Wallet", "Check"]
-DEFAULT_INCOME_SOURCES = ["Salary", "Freelance", "Investments", "Rental", "Business", "Gifts", "Other"]
-
-def get_dynamic_categories(conn, table, column, user_id, default_list):
-    df = pd.read_sql(f"SELECT DISTINCT {column} FROM {table} WHERE user_id = ? AND {column} IS NOT NULL", conn, params=(user_id,))
-    categories = df[column].tolist()
-    return categories if categories else default_list
-
-EXPENSE_CATEGORIES = get_dynamic_categories(conn, "expenses", "category", current_user_id, DEFAULT_EXPENSE_CATEGORIES)
-PAYMENT_METHODS = get_dynamic_categories(conn, "expenses", "payment_method", current_user_id, DEFAULT_PAYMENT_METHODS)
-INCOME_SOURCES = get_dynamic_categories(conn, "income", "source", current_user_id, DEFAULT_INCOME_SOURCES)
-
-def get_last_month():
-    today = datetime.now()
-    first_day = today.replace(day=1)
-    last_month = first_day - timedelta(days=1)
-    return last_month.strftime("%Y-%m")
-
-# Currency Converter (placeholder)
-def convert_currency(amount, from_currency="USD", to_currency="EUR"):
-    return amount  # Replace with real API call if needed
-
-# PDF Report
-def generate_pdf_report(conn, user_id):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    elements = []
-    styles = getSampleStyleSheet()
+    # [Other pages would follow similar patterns...]
     
-    elements.append(Paragraph("ProFinance Report", styles['Title']))
-    current_month = datetime.now().strftime("%Y-%m")
-    monthly_spending = pd.read_sql("SELECT SUM(amount) as total FROM expenses WHERE user_id = ? AND strftime('%Y-%m', date) = ?", conn, params=(user_id, current_month)).iloc[0,0] or 0
-    monthly_income = pd.read_sql("SELECT SUM(amount) as total FROM income WHERE user_id = ? AND strftime('%Y-%m', date) = ?", conn, params=(user_id, current_month)).iloc[0,0] or 0
-    savings = pd.read_sql("SELECT SUM(current_amount) as saved FROM savings_goals WHERE user_id = ?", conn, params=(user_id,)).iloc[0,0] or 0
-    profit = monthly_income - monthly_spending
-    inv_value = pd.read_sql("SELECT SUM(current_value) as total FROM investments WHERE user_id = ?", conn, params=(user_id,)).iloc[0,0] or 0
-    
-    summary_data = [
-        ["Metric", "Value"],
-        ["Monthly Spending", f"${monthly_spending:,.2f}"],
-        ["Monthly Income", f"${monthly_income:,.2f}"],
-        ["Profit", f"${profit:,.2f}"],
-        ["Savings", f"${savings:,.2f}"],
-        ["Investment Value", f"${inv_value:,.2f}"]
-    ]
-    table = Table(summary_data)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
-    elements.append(table)
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
-
-# Dashboard
-if page == "Dashboard":
-    st.title("🏠 Finance Dashboard")
-    today = datetime.now()
-    current_month = today.strftime("%Y-%m")
-    last_month = get_last_month()
-    
-    cols = st.columns(4)
-    with cols[0]:
-        monthly_spending = pd.read_sql("SELECT SUM(amount) as total FROM expenses WHERE user_id = ? AND strftime('%Y-%m', date) = ?", conn, params=(current_user_id, current_month)).iloc[0,0] or 0
-        last_month_spending = pd.read_sql("SELECT SUM(amount) as total FROM expenses WHERE user_id = ? AND strftime('%Y-%m', date) = ?", conn, params=(current_user_id, last_month)).iloc[0,0] or 0
-        change = ((monthly_spending - last_month_spending) / last_month_spending * 100) if last_month_spending else 0
-        st.metric("Monthly Spending", f"${monthly_spending:,.2f}", f"{change:.1f}%")
-    with cols[1]:
-        monthly_income = pd.read_sql("SELECT SUM(amount) as total FROM income WHERE user_id = ? AND strftime('%Y-%m', date) = ?", conn, params=(current_user_id, current_month)).iloc[0,0] or 0
-        last_month_income = pd.read_sql("SELECT SUM(amount) as total FROM income WHERE user_id = ? AND strftime('%Y-%m', date) = ?", conn, params=(current_user_id, last_month)).iloc[0,0] or 0
-        income_change = ((monthly_income - last_month_income) / last_month_income * 100) if last_month_income else 0
-        st.metric("Monthly Income", f"${monthly_income:,.2f}", f"{income_change:.1f}%")
-    with cols[2]:
-        profit = monthly_income - monthly_spending
-        last_month_profit = last_month_income - last_month_spending
-        profit_change = ((profit - last_month_profit) / last_month_profit * 100) if last_month_profit else 0
-        st.metric("Monthly Profit", f"${profit:,.2f}", f"{profit_change:.1f}%")
-    with cols[3]:
-        savings = pd.read_sql("SELECT SUM(current_amount) as saved FROM savings_goals WHERE user_id = ?", conn, params=(current_user_id,)).iloc[0,0] or 0
-        target = pd.read_sql("SELECT SUM(target_amount) as target FROM savings_goals WHERE user_id = ?", conn, params=(current_user_id,)).iloc[0,0] or 0
-        progress = (savings / target * 100) if target else 0
-        st.metric("Savings Progress", f"${savings:,.2f}", f"{progress:.1f}% of ${target:,.2f}")
-
-    st.subheader("Financial Overview")
-    time_period = st.selectbox("Time Period", ["Last 3 Months", "Last 6 Months", "Last 12 Months", "Current Year"])
-    date_filter = {
-        "Last 3 Months": "-3 months",
-        "Last 6 Months": "-6 months",
-        "Last 12 Months": "-12 months",
-        "Current Year": "strftime('%Y', date) = strftime('%Y', 'now')"
-    }[time_period]
-    
-    # Corrected SQL queries
-    if time_period == "Current Year":
-        spending_data = pd.read_sql("SELECT strftime('%Y-%m', date) as month, SUM(amount) as spending FROM expenses WHERE user_id = ? AND " + date_filter + " GROUP BY month ORDER BY month",
-                                    conn, params=(current_user_id,))
-        income_data = pd.read_sql("SELECT strftime('%Y-%m', date) as month, SUM(amount) as income FROM income WHERE user_id = ? AND " + date_filter + " GROUP BY month ORDER BY month",
-                                  conn, params=(current_user_id,))
-    else:
-        spending_data = pd.read_sql("SELECT strftime('%Y-%m', date) as month, SUM(amount) as spending FROM expenses WHERE user_id = ? AND date >= date('now', ?) GROUP BY month ORDER BY month",
-                                    conn, params=(current_user_id, date_filter))
-        income_data = pd.read_sql("SELECT strftime('%Y-%m', date) as month, SUM(amount) as income FROM income WHERE user_id = ? AND date >= date('now', ?) GROUP BY month ORDER BY month",
-                                  conn, params=(current_user_id, date_filter))
-    
-    comparison_data = pd.merge(spending_data, income_data, on='month', how='outer').fillna(0)
-    comparison_data['profit'] = comparison_data['income'] - comparison_data['spending']
-    fig = px.bar(comparison_data, x='month', y=['income', 'spending', 'profit'], barmode='group', title=f"Financial Flow ({time_period})",
-                 labels={'value': 'Amount ($)', 'month': 'Month'}, color_discrete_map={'income': '#00CC96', 'spending': '#EF553B', 'profit': '#636EFA'})
-    st.plotly_chart(fig)
-
-# Expenses
-elif page == "Expenses":
-    st.title("💸 Expense Tracking")
-    with st.form("expense_form"):
-        amount = st.number_input("Amount ($)", min_value=0.01, step=0.01)
+    # Settings Page
+    elif page == "⚙️ Settings":
+        st.title("Settings")
+        
+        with st.form("user_settings_form"):
+            st.subheader("Personal Information")
+            new_username = st.text_input("Username", value=user_settings.get('username', ''))
+            new_currency = st.selectbox(
+                "Default Currency",
+                ["USD", "EUR", "GBP", "JPY", "CAD", "AUD"],
+                index=["USD", "EUR", "GBP", "JPY", "CAD", "AUD"].index(user_settings.get('currency', 'USD'))
+            )
+            
+            st.subheader("Security")
+            current_password = st.text_input("Current Password", type="password")
+            new_password = st.text_input("New Password", type="password")
+            confirm_password = st.text_input("Confirm New Password", type="password")
+            
+            if st.form_submit_button("Save Settings"):
+                updates = {
+                    "username": new_username,
+                    "currency": new_currency,
+                    "updated_at": datetime.now().isoformat()
+                }
+                
+                if new_password and new_password == confirm_password:
+                    updates["password"] = new_password  # In production, hash this password
+                
+                if update_user_settings(current_user_id, updates):
+                    st.success("Settings updated successfully!")
+                else:
+                    st.error("Failed to update settings")
+        
+        st.subheader("Data Management")
         col1, col2 = st.columns(2)
-        category = col1.selectbox("Category", EXPENSE_CATEGORIES + ["Add New"])
-        if category == "Add New":
-            category = col1.text_input("New Category")
-        subcategory = col2.text_input("Subcategory (Optional)")
-        col1, col2 = st.columns(2)
-        date = col1.date_input("Date", datetime.now())
-        payment_method = col2.selectbox("Payment Method", PAYMENT_METHODS + ["Add New"])
-        if payment_method == "Add New":
-            payment_method = col2.text_input("New Payment Method")
-        description = st.text_input("Description (Optional)")
-        submitted = st.form_submit_button("Add Expense")
-        if submitted:
-            c = conn.cursor()
-            c.execute("INSERT INTO expenses (user_id, amount, category, subcategory, date, description, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                      (current_user_id, amount, category, subcategory, str(date), description, payment_method))
-            conn.commit()
-            st.success("Expense added!")
-            EXPENSE_CATEGORIES = get_dynamic_categories(conn, "expenses", "category", current_user_id, DEFAULT_EXPENSE_CATEGORIES)
-            PAYMENT_METHODS = get_dynamic_categories(conn, "expenses", "payment_method", current_user_id, DEFAULT_PAYMENT_METHODS)
+        
+        with col1:
+            if st.button("Export All Data"):
+                # Export functionality would go here
+                st.info("Export feature coming soon!")
+        
+        with col2:
+            if st.button("Delete Account", type="secondary"):
+                st.warning("This will permanently delete all your data!")
+                if st.checkbox("I understand this cannot be undone"):
+                    if st.button("Confirm Deletion", type="primary"):
+                        st.error("Account deletion feature coming soon!")
 
-    st.subheader("Expense Analysis")
-    col1, col2 = st.columns(2)
-    start_date = col1.date_input("Start Date", datetime.now() - timedelta(days=30))
-    end_date = col2.date_input("End Date", datetime.now())
-    expenses_df = pd.read_sql("SELECT date, category, amount, payment_method, description FROM expenses WHERE user_id = ? AND date BETWEEN ? AND ? ORDER BY date DESC",
-                              conn, params=(current_user_id, str(start_date), str(end_date)))
-    total_spent = expenses_df['amount'].sum()
-    avg_daily = total_spent / ((end_date - start_date).days + 1) if (end_date - start_date).days > 0 else total_spent
-    st.write(f"**Total Spent:** ${total_spent:,.2f} | **Avg Daily:** ${avg_daily:,.2f}")
-    st.dataframe(expenses_df)
-    csv = expenses_df.to_csv(index=False)
-    st.download_button("Download Expenses as CSV", csv, "expenses.csv", "text/csv")
-    
-    cat_data = expenses_df.groupby('category')['amount'].sum().reset_index()
-    fig = px.pie(cat_data, values='amount', names='category', title="Expense Distribution")
-    st.plotly_chart(fig)
-
-# Income
-elif page == "Income":
-    st.title("💵 Income Tracking")
-    with st.form("income_form"):
-        amount = st.number_input("Amount ($)", min_value=0.01, step=0.01)
-        col1, col2 = st.columns(2)
-        source = col1.selectbox("Source", INCOME_SOURCES + ["Add New"])
-        if source == "Add New":
-            source = col1.text_input("New Source")
-        date = col2.date_input("Date", datetime.now())
-        description = st.text_input("Description (Optional)")
-        submitted = st.form_submit_button("Add Income")
-        if submitted:
-            c = conn.cursor()
-            c.execute("INSERT INTO income (user_id, amount, source, date, description) VALUES (?, ?, ?, ?, ?)",
-                      (current_user_id, amount, source, str(date), description))
-            conn.commit()
-            st.success("Income added!")
-            INCOME_SOURCES = get_dynamic_categories(conn, "income", "source", current_user_id, DEFAULT_INCOME_SOURCES)
-    
-    st.subheader("Income Analysis")
-    col1, col2 = st.columns(2)
-    start_date = col1.date_input("Start Date", datetime.now() - timedelta(days=30))
-    end_date = col2.date_input("End Date", datetime.now())
-    income_df = pd.read_sql("SELECT date, source, amount, description FROM income WHERE user_id = ? AND date BETWEEN ? AND ? ORDER BY date DESC",
-                            conn, params=(current_user_id, str(start_date), str(end_date)))
-    total_income = income_df['amount'].sum()
-    avg_daily = total_income / ((end_date - start_date).days + 1) if (end_date - start_date).days > 0 else total_income
-    st.write(f"**Total Income:** ${total_income:,.2f} | **Avg Daily:** ${avg_daily:,.2f}")
-    st.dataframe(income_df)
-    csv = income_df.to_csv(index=False)
-    st.download_button("Download Income as CSV", csv, "income.csv", "text/csv")
-    
-    source_data = income_df.groupby('source')['amount'].sum().reset_index()
-    fig = px.bar(source_data, x='source', y='amount', title="Income by Source", labels={'source': 'Income Source', 'amount': 'Amount ($)'})
-    st.plotly_chart(fig)
-
-# Budgets
-elif page == "Budgets":
-    st.title("📊 Budget Management")
-    tab1, tab2 = st.tabs(["Set Budgets", "Budget Analysis"])
-    with tab1:
-        with st.form("budget_form"):
-            category = st.selectbox("Category", EXPENSE_CATEGORIES + ["Add New"])
-            if category == "Add New":
-                category = st.text_input("New Category")
-            limit_amount = st.number_input("Monthly Limit ($)", min_value=0.01, step=0.01)
-            submitted = st.form_submit_button("Save Budget")
-            if submitted:
-                c = conn.cursor()
-                c.execute("INSERT OR REPLACE INTO budgets (user_id, category, limit_amount, period) VALUES (?, ?, ?, ?)",
-                          (current_user_id, category, limit_amount, "Monthly"))
-                conn.commit()
-                st.success("Budget saved!")
-                EXPENSE_CATEGORIES = get_dynamic_categories(conn, "expenses", "category", current_user_id, DEFAULT_EXPENSE_CATEGORIES)
-    with tab2:
-        current_month = datetime.now().strftime("%Y-%m")
-        budget_status = pd.read_sql("""
-            SELECT b.category, b.limit_amount, COALESCE(SUM(e.amount), 0) as spent
-            FROM budgets b
-            LEFT JOIN expenses e ON b.category = e.category AND strftime('%Y-%m', e.date) = ?
-            WHERE b.user_id = ?
-            GROUP BY b.category, b.limit_amount
-        """, conn, params=(current_month, current_user_id))
-        budget_status['remaining'] = budget_status['limit_amount'] - budget_status['spent']
-        budget_status['progress'] = (budget_status['spent'] / budget_status['limit_amount'] * 100).clip(0, 100)
-        st.dataframe(budget_status)
-        fig = px.bar(budget_status, x='category', y=['spent', 'limit_amount'], barmode='group', title="Budget vs Actual Spending")
-        st.plotly_chart(fig)
-
-# Goals
-elif page == "Goals":
-    st.title("🎯 Savings Goals")
-    with st.form("goal_form"):
-        goal_name = st.text_input("Goal Name")
-        target_amount = st.number_input("Target Amount ($)", min_value=0.01)
-        current_amount = st.number_input("Current Amount ($)", min_value=0.0)
-        target_date = st.date_input("Target Date")
-        priority = st.slider("Priority", 1, 5, 3)
-        description = st.text_area("Description (Optional)")
-        submitted = st.form_submit_button("Add Goal")
-        if submitted:
-            c = conn.cursor()
-            c.execute("INSERT INTO savings_goals (user_id, goal_name, target_amount, current_amount, target_date, priority, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                      (current_user_id, goal_name, target_amount, current_amount, str(target_date), priority, description))
-            conn.commit()
-            st.success("Goal added!")
-    
-    st.subheader("Goal Progress")
-    goals = pd.read_sql("SELECT goal_name, target_amount, current_amount, target_date FROM savings_goals WHERE user_id = ?", conn, params=(current_user_id,))
-    goals['progress'] = (goals['current_amount'] / goals['target_amount'] * 100).clip(0, 100)
-    for _, row in goals.iterrows():
-        st.write(f"**{row['goal_name']}** - Target: ${row['target_amount']:,.2f} by {row['target_date']}")
-        st.progress(row['progress']/100, f"Progress: ${row['current_amount']:,.2f} ({row['progress']:.1f}%)")
-    fig = px.bar(goals, x='goal_name', y=['current_amount', 'target_amount'], barmode='group', title="Savings Goals Progress")
-    st.plotly_chart(fig)
-
-# Investments
-elif page == "Investments":
-    st.title("💰 Investment Tracking")
-    with st.form("investment_form"):
-        asset_name = st.text_input("Asset Name (e.g., Stock, Crypto)")
-        amount_invested = st.number_input("Amount Invested ($)", min_value=0.01)
-        current_value = st.number_input("Current Value ($)", min_value=0.0)
-        purchase_date = st.date_input("Purchase Date", datetime.now())
-        submitted = st.form_submit_button("Add Investment")
-        if submitted:
-            c = conn.cursor()
-            c.execute("INSERT INTO investments (user_id, asset_name, amount_invested, current_value, purchase_date) VALUES (?, ?, ?, ?, ?)",
-                      (current_user_id, asset_name, amount_invested, current_value, str(purchase_date)))
-            conn.commit()
-            st.success("Investment added!")
-    
-    st.subheader("Investment Portfolio")
-    inv_df = pd.read_sql("SELECT asset_name, amount_invested, current_value, purchase_date FROM investments WHERE user_id = ?", conn, params=(current_user_id,))
-    total_value = inv_df['current_value'].sum()
-    total_invested = inv_df['amount_invested'].sum()
-    roi = ((total_value - total_invested) / total_invested * 100) if total_invested > 0 else 0
-    st.write(f"**Total Invested:** ${total_invested:,.2f} | **Current Value:** ${total_value:,.2f} | **ROI:** {roi:.1f}%")
-    st.dataframe(inv_df)
-    fig = px.bar(inv_df, x='asset_name', y=['amount_invested', 'current_value'], barmode='group', title="Investment Performance")
-    st.plotly_chart(fig)
-
-# Recurring Transactions
-elif page == "Recurring":
-    st.title("🔄 Recurring Transactions")
-    with st.form("recurring_form"):
-        rec_type = st.selectbox("Type", ["Expense", "Income"])
-        amount = st.number_input("Amount ($)", min_value=0.01)
-        category = st.selectbox("Category", EXPENSE_CATEGORIES + INCOME_SOURCES + ["Add New"])
-        if category == "Add New":
-            category = st.text_input("New Category")
-        frequency = st.selectbox("Frequency", ["Daily", "Weekly", "Monthly", "Yearly"])
-        next_date = st.date_input("Next Occurrence", datetime.now())
-        submitted = st.form_submit_button("Add Recurring")
-        if submitted:
-            c = conn.cursor()
-            c.execute("INSERT INTO recurring (user_id, type, amount, category, frequency, next_date) VALUES (?, ?, ?, ?, ?, ?)",
-                      (current_user_id, rec_type, amount, category, frequency, str(next_date)))
-            conn.commit()
-            st.success("Recurring transaction added!")
-    
-    st.subheader("Recurring List")
-    rec_df = pd.read_sql("SELECT type, amount, category, frequency, next_date FROM recurring WHERE user_id = ?", conn, params=(current_user_id,))
-    st.dataframe(rec_df)
-
-# Analytics
-elif page == "Analytics":
-    st.title("📈 Financial Analytics")
-    st.subheader("Income vs Expenses Trend")
-    time_period = st.selectbox("Time Period", ["Last 3 Months", "Last 6 Months", "Last 12 Months"])
-    date_filter = {"Last 3 Months": '-3 months', "Last 6 Months": '-6 months', "Last 12 Months": '-12 months'}[time_period]
-    monthly_data = pd.read_sql("""
-        SELECT strftime('%Y-%m', date) as month,
-               SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END) as expenses,
-               SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as income
-        FROM (SELECT date, -amount as amount FROM expenses WHERE user_id = ?
-              UNION ALL
-              SELECT date, amount FROM income WHERE user_id = ?)
-        WHERE date >= date('now', ?)
-        GROUP BY month
-        ORDER BY month
-    """, conn, params=(current_user_id, current_user_id, date_filter))
-    monthly_data['profit'] = monthly_data['income'] - (-monthly_data['expenses'])  # Corrected profit calculation
-    fig = px.line(monthly_data, x='month', y=['income', 'expenses', 'profit'], title=f"Financial Trends ({time_period})",
-                  labels={'value': 'Amount ($)', 'month': 'Month'}, color_discrete_map={'income': '#00CC96', 'expenses': '#EF553B', 'profit': '#636EFA'})
-    st.plotly_chart(fig)
-    
-    st.subheader("Financial Health Indicators")
-    profit_rate = (monthly_data['profit'].mean() / monthly_data['income'].mean() * 100) if monthly_data['income'].mean() else 0
-    st.metric("Average Profit Rate", f"{profit_rate:.1f}%")
-    expense_ratio = (-monthly_data['expenses'].mean() / monthly_data['income'].mean() * 100) if monthly_data['income'].mean() else 0
-    st.metric("Expense-to-Income Ratio", f"{expense_ratio:.1f}%")
-    
-    st.subheader("Tax Estimation (Premium Feature)")
-    st.info("Unlock tax insights with ProFinance Premium! Estimated tax: ~15-30% of profit (simplified).")
-
-# Reports
-elif page == "Reports":
-    st.title("📑 Financial Reports")
-    with st.form("report_form"):
-        report_period = st.selectbox("Report Period", ["Current Month", "Last 3 Months", "Last 6 Months"])
-        currency = st.selectbox("Currency", ["USD", "EUR", "GBP"])
-        submitted = st.form_submit_button("Generate PDF Report")
-        if submitted:
-            pdf_buffer = generate_pdf_report(conn, current_user_id)
-            if currency != "USD":
-                st.warning("Currency conversion in PDF is illustrative. Full support in Premium.")
-            st.download_button("Download PDF Report", pdf_buffer, "financial_report.pdf", "application/pdf")
-            st.success("Report generated successfully!")
-    
-    st.subheader("Profit Maximization Tips")
-    profit = monthly_income - monthly_spending
-    if profit > 0:
-        st.success(f"Profit: ${profit:,.2f}. Consider investing in low-risk ETFs or bonds.")
-    else:
-        st.warning(f"Loss: ${-profit:,.2f}. Reduce discretionary spending to boost profit.")
-
-conn.close()
+if __name__ == "__main__":
+    main()
