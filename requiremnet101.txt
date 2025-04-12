@@ -1,25 +1,9 @@
-
-
-# Core dependencies
-streamlit==1.38.0
-pandas==2.2.2
-plotly==5.22.0
-numpy==1.26.4
-
-# Database client
-supabase==2.7.4
-
-# AI/ML dependencies
-google-generativeai==0.8.2
-
-# PDF generation
-reportlab==4.2.2
-
-# Date utilities
-python-dateutil==2.9.0.post0
-
-# Additional dependencies for file handling and processing
-Pillow==10.4.0  # For image processing in reportlab
-
-# Optional: For better performance and security
-bcrypt==4.2.0  # For password hashing (recommended for production)
+streamlit
+supabase
+google-generativeai
+plotly
+pandas
+numpy
+python-dotenv
+reportlab
+python-dateutil
