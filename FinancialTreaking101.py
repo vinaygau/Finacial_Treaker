@@ -470,15 +470,14 @@ def main():
         # Recent Transactions
         st.subheader("Recent Transactions")
         col1, col2 = st.columns([3, 1])
+        transactions = sb.table("transactions")\
+        .select("*")\
+        .eq("user_id", current_user_id)\
+        .order("date", desc=True)\
+        .limit(10)\
+        .execute()
         
-            transactions = sb.table("transactions")\
-                          .select("*")\
-                          .eq("user_id", current_user_id)\
-                          .order("date", desc=True)\
-                          .limit(10)\
-                          .execute()
-            
-            if transactions.data:
+        if transactions.data:
                 trans_df = pd.DataFrame(transactions.data)
                 st.dataframe(
                     trans_df[['date', 'description', 'amount', 'category']]\
