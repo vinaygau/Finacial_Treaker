@@ -14,11 +14,11 @@ import numpy as np
 # Initialize Supabase client
 @st.cache_resource
 def init_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    
 
 
 # Initialize clients
-sb = init_supabase()
+
 financial_model = genai.GenerativeModel('gemini-pro')
 
 # --------------------------
@@ -216,7 +216,7 @@ def generate_comprehensive_report(user_id):
     try:
         buffer = io.BytesIO()
         elements = []
-        styles = getSampleStyleSheet()
+        
         
         # Title
         elements.append(Paragraph("Comprehensive Financial Report", styles['Title']))
@@ -258,7 +258,7 @@ def generate_comprehensive_report(user_id):
             budget_data = [["Category", "Budget", "Spent", "Remaining", "Usage %"]]
             for category, data in summary['budget_usage'].items():
                 budget_data.append([
-                    category,
+                    
                     f"${data['limit']:,.2f}",
                     f"${data['spent']:,.2f}",
                     f"${data['remaining']:,.2f}",
@@ -317,7 +317,7 @@ def main():
         menu_items={
             'Get Help': 'https://github.com/your-repo',
             'Report a bug': "https://github.com/your-repo/issues",
-            'About': "# Advanced Financial Tracker"
+            
         }
     )
     
