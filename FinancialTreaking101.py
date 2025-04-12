@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import io
 import time
 import calendar
+from dotenv import load_dotenv
+load_dotenv()
 from dateutil.relativedelta import relativedelta
 import numpy as np
 import os
@@ -17,7 +19,7 @@ import google.generativeai as genai
 
 # Initialize configuration from environment variables or Streamlit secrets
 def get_config():
-    """Get configuration from secrets or environment variables"""
+    """Gets config from either Streamlit secrets or .env"""
     return {
         "SUPABASE_URL": st.secrets.get("SUPABASE_URL", os.getenv("https://hugjvlpvxqvnkuzfyacw.supabase.co")),
         "SUPABASE_KEY": st.secrets.get("SUPABASE_KEY", os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Z2p2bHB2eHF2bmt1emZ5YWN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ0Nzg4NDIsImV4cCI6MjA2MDA1NDg0Mn0.BDe2Wrr74P-pkR0XF6Sfgheq6k4Z0LvidHV-7JiDC30")),
