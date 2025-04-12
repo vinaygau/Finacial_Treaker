@@ -7,10 +7,6 @@ import calendar
 from dateutil.relativedelta import relativedelta
 import numpy as np
 import os
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet
 
 # --------------------------
 # CONFIGURATION (using environment variables)
