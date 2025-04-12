@@ -310,8 +310,6 @@ def main():
     
     current_user_id = 1
     user_settings = get_user_settings(current_user_id)
-    
-    # Page config
     st.set_page_config
         page_title="ProFinance Manager", 
         layout="wide", 
