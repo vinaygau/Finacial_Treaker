@@ -311,14 +311,14 @@ def main():
     current_user_id = 1
     user_settings = get_user_settings(current_user_id)
     st.set_page_config
-        page_title="ProFinance Manager", 
-        layout="wide", 
-        initial_sidebar_state="expanded",
-        {
-            'Get Help': 'https://github.com/your-repo',
-            'Report a bug': "https://github.com/your-repo/issues",
-            'About': "# Advanced Financial Tracker"
-        }
+    page_title="ProFinance Manager", 
+    layout="wide", 
+    initial_sidebar_state="expanded",
+    {
+        'Get Help': 'https://github.com/your-repo',
+        'Report a bug': "https://github.com/your-repo/issues",
+        'About': "# Advanced Financial Tracker"
+    }
     
     
     # Custom CSS
