@@ -14,12 +14,7 @@ import numpy as np
 # Initialize Supabase client
 @st.cache_resource
 def init_supabase():
-    
-
-
-# Initialize clients
-
-financial_model = genai.GenerativeModel('gemini-pro')
+    financial_model = genai.GenerativeModel('gemini-pro')
 
 # --------------------------
 # DATABASE FUNCTIONS
