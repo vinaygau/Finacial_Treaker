@@ -7,7 +7,6 @@ import calendar
 from dateutil.relativedelta import relativedelta
 import numpy as np
 import os
-from supabase import create_client, Client
 import google.generativeai as genai
 import plotly.express as px
 from reportlab.lib import colors
