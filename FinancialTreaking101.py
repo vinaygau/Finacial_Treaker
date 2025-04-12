@@ -3,10 +3,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import io
 import time
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib import colors
 from reportlab.platypus.flowables import Spacer
 import calendar
 from dateutil.relativedelta import relativedelta
