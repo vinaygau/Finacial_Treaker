@@ -321,7 +321,7 @@ def main():
             'Report a bug': "https://github.com/your-repo/issues",
             'About': "# Advanced Financial Tracker"
         }
-    )
+    
     
     # Custom CSS
     st.markdown("""
