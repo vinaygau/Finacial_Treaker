@@ -7,6 +7,7 @@ import calendar
 from dateutil.relativedelta import relativedelta
 import numpy as np
 import os
+from supabase import create_client
 import google.generativeai as genai
 import plotly.express as px
 from reportlab.lib import colors
@@ -19,9 +20,9 @@ from reportlab.lib.styles import getSampleStyleSheet
 # --------------------------
 
 # Initialize configuration from environment variables or Streamlit secrets
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("https://hugjvlpvxqvnkuzfyacw.supabase.co"))
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Z2p2bHB2eHF2bmt1emZ5YWN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ0Nzg4NDIsImV4cCI6MjA2MDA1NDg0Mn0.BDe2Wrr74P-pkR0XF6Sfgheq6k4Z0LvidHV-7JiDC30"))
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.getenv("AIzaSyAtGPjtvE-kiDDNjrK75y5uKUz8SfEmQc"))
 
 # Validate configuration
 if not all([SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY]):
