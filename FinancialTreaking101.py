@@ -312,7 +312,7 @@ def main():
     user_settings = get_user_settings(current_user_id)
     
     # Page config
-    st.set_page_config(
+    st.set_page_config
         page_title="ProFinance Manager", 
         layout="wide", 
         initial_sidebar_state="expanded",
