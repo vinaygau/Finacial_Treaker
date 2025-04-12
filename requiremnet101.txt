@@ -4,8 +4,7 @@ google-generativeai
 plotly
 pandas
 numpy
-python-dotenv
 reportlab
 python-dateutil
-supabase==2.3.1
+python-dotenvsupabase==2.3.1
 google-generativeai==0.3.2
