@@ -1,6 +1,5 @@
 import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go  # Optional, if you need extra features
+import pandas as pd# Optional, if you need extra features
 from datetime import datetime, timedelta
 import sqlite3
 import io
