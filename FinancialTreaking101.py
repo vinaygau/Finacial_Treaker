@@ -14,8 +14,6 @@ import numpy as np
 # Initialize Supabase client
 @st.cache_resource
 def init_supabase():
-    SUPABASE_URL = st.secrets["https://hugjvlpvxqvnkuzfyacw.supabase.co"]
-    SUPABASE_KEY = st.secrets["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Z2p2bHB2eHF2bmt1emZ5YWN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ0Nzg4NDIsImV4cCI6MjA2MDA1NDg0Mn0.BDe2Wrr74P-pkR0XF6Sfgheq6k4Z0LvidHV-7JiDC30"]
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
@@ -217,7 +215,6 @@ def generate_comprehensive_report(user_id):
     """Generate a detailed PDF financial report"""
     try:
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter)
         elements = []
         styles = getSampleStyleSheet()
         
@@ -260,7 +257,7 @@ def generate_comprehensive_report(user_id):
         if summary['budget_usage']:
             budget_data = [["Category", "Budget", "Spent", "Remaining", "Usage %"]]
             for category, data in summary['budget_usage'].items():
-                budget_data.append([
+                ([
                     category,
                     f"${data['limit']:,.2f}",
                     f"${data['spent']:,.2f}",
@@ -319,7 +316,7 @@ def main():
         page_title="ProFinance Manager", 
         layout="wide", 
         initial_sidebar_state="expanded",
-        menu_items={
+        {
             'Get Help': 'https://github.com/your-repo',
             'Report a bug': "https://github.com/your-repo/issues",
             'About': "# Advanced Financial Tracker"
@@ -476,7 +473,6 @@ def main():
         st.subheader("Recent Transactions")
         col1, col2 = st.columns([3, 1])
         
-        with col1:
             transactions = sb.table("transactions")\
                           .select("*")\
                           .eq("user_id", current_user_id)\
