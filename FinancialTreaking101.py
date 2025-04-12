@@ -257,7 +257,7 @@ def generate_comprehensive_report(user_id):
         if summary['budget_usage']:
             budget_data = [["Category", "Budget", "Spent", "Remaining", "Usage %"]]
             for category, data in summary['budget_usage'].items():
-                ([
+                budget_data.append([
                     category,
                     f"${data['limit']:,.2f}",
                     f"${data['spent']:,.2f}",
@@ -310,16 +310,16 @@ def main():
     
     current_user_id = 1
     user_settings = get_user_settings(current_user_id)
-    st.set_page_config
-    page_title="ProFinance Manager", 
-    layout="wide", 
-    initial_sidebar_state="expanded",
-    {
-        'Get Help': 'https://github.com/your-repo',
-        'Report a bug': "https://github.com/your-repo/issues",
-        'About': "# Advanced Financial Tracker"
-    }
-    
+    st.set_page_config(
+        page_title="ProFinance Manager", 
+        layout="wide", 
+        initial_sidebar_state="expanded",
+        menu_items={
+            'Get Help': 'https://github.com/your-repo',
+            'Report a bug': "https://github.com/your-repo/issues",
+            'About': "# Advanced Financial Tracker"
+        }
+    )
     
     # Custom CSS
     st.markdown("""
@@ -470,14 +470,15 @@ def main():
         # Recent Transactions
         st.subheader("Recent Transactions")
         col1, col2 = st.columns([3, 1])
-        transactions = sb.table("transactions")\
-        .select("*")\
-        .eq("user_id", current_user_id)\
-        .order("date", desc=True)\
-        .limit(10)\
-        .execute()
-        
-        if transactions.data:
+        with col1:
+            transactions = sb.table("transactions")\
+                .select("*")\
+                .eq("user_id", current_user_id)\
+                .order("date", desc=True)\
+                .limit(10)\
+                .execute()
+            
+            if transactions.data:
                 trans_df = pd.DataFrame(transactions.data)
                 st.dataframe(
                     trans_df[['date', 'description', 'amount', 'category']]\
