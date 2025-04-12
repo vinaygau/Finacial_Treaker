@@ -7,7 +7,6 @@ import calendar
 from dateutil.relativedelta import relativedelta
 import numpy as np
 import os
-import plotly.express as px
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
