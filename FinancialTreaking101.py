@@ -3,6 +3,13 @@ import pandas as pd
 from datetime import datetime, timedelta
 import io
 import time
+from supabase import create_client, Client
+import google.generativeai as genai
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from reportlab.platypus.flowables import Spacer
 import calendar
 from dateutil.relativedelta import relativedelta
 import numpy as np
@@ -14,12 +21,12 @@ import numpy as np
 # Initialize Supabase client
 @st.cache_resource
 def init_supabase():
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    SUPABASE_URL = st.secrets["https://hugjvlpvxqvnkuzfyacw.supabase.co"]
+    SUPABASE_KEY = st.secrets["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1Z2p2bHB2eHF2bmt1emZ5YWN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ0Nzg4NDIsImV4cCI6MjA2MDA1NDg0Mn0.BDe2Wrr74P-pkR0XF6Sfgheq6k4Z0LvidHV-7JiDC30"]
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Initialize Gemini AI
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+genai.configure(api_key=st.secrets["AIzaSyAtGPjtvE-kiDDNjrK75y5uKUz8SfEmQc"])
 
 # Initialize clients
 sb = init_supabase()
