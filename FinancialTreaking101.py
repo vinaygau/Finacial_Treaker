@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from dateutil.relativedelta import relativedelta
 import numpy as np
+from dotenv import load_dotenv
 import os
 from supabase import create_client
 import google.generativeai as genai
