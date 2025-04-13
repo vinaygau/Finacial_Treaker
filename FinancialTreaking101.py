@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 import io
 import time
 import calendar
-load_dotenv()
 from dateutil.relativedelta import relativedelta
 import numpy as np
 from dotenv import load_dotenv
