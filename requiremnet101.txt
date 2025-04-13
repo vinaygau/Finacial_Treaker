@@ -8,4 +8,6 @@ reportlab
 python-dateutil
 python-dotenvsupabase==2.3.1
 google-generativeai==0.3.2
-python-dotenv>=1.0.0
+python-dotenv
+streamlit
+# Add other dependencies your app needs, e.g., supabase, google-generativeai
